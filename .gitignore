@@ -1,0 +1,12 @@
+venv/
+liboqs-python/
+__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.gradle/
+build/
+*.iml
+local.properties
+android_kyber_application/backend/clients.json
+android_kyber_application/backend/*.db
