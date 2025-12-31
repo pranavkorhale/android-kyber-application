@@ -111,6 +111,15 @@ async def register(request: RegisterRequest):
     # 2. Derive AES Key
     aes_key = derive_aes_key(shared_secret)
 
+    print(f"DEBUG: Registering Client {request.client_id}")
+    print(f"DEBUG: Rx Dilithium PK (B64): {request.dilithium_public_key[:30]}...")
+    try:
+        dk_bytes = base64.b64decode(request.dilithium_public_key)
+        print(f"DEBUG: Rx Dilithium PK Len: {len(dk_bytes)}")
+        print(f"DEBUG: Rx Dilithium PK Hex (First 32): {dk_bytes.hex()[:64]}")
+    except Exception as e:
+        print(f"DEBUG: Dilithium PK Decode Error: {e}")
+
     # 3. Store Client Info
     manager.register_client(request.client_id, aes_key, request.dilithium_public_key, request.kyber_public_key)
 
@@ -144,38 +153,58 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             try:
                 sender_id_bytes = msg.sender_id.encode('utf-8')
                 recipient_id_bytes = msg.recipient_id.encode('utf-8')
-                content_bytes = base64.b64decode(msg.content)
-                nonce_bytes = base64.b64decode(msg.nonce)
-                kem_ciphertext_bytes = base64.b64decode(msg.kem_ciphertext)
+                # Use Base64 strings directly for payload construction to ensure consistency
+                # Convert strings to bytes for concatenation
+                content_b64_bytes = msg.content.encode('utf-8')
+                nonce_b64_bytes = msg.nonce.encode('utf-8')
+                kem_ciphertext_b64_bytes = msg.kem_ciphertext.encode('utf-8')
                 
-                payload = sender_id_bytes + recipient_id_bytes + content_bytes + nonce_bytes + kem_ciphertext_bytes
+                payload = sender_id_bytes + recipient_id_bytes + content_b64_bytes + nonce_b64_bytes + kem_ciphertext_b64_bytes
                 
                 # Hash payload (SHA-256)
                 payload_hash = hashlib.sha256(payload).digest()
+
+                print(f"DEBUG: --- Payload Construction ---")
+                print(f"DEBUG: SenderID: {msg.sender_id} (Hex: {sender_id_bytes.hex()})")
+                print(f"DEBUG: RecipientID: {msg.recipient_id} (Hex: {recipient_id_bytes.hex()})")
+                print(f"DEBUG: Content (B64): {msg.content[:10]}... Hex: {content_b64_bytes.hex()[:20]}...")
+                print(f"DEBUG: Nonce (B64): {msg.nonce[:10]}... Hex: {nonce_b64_bytes.hex()[:20]}...")
+                print(f"DEBUG: Ciphertext (B64): {msg.kem_ciphertext[:10]}... Hex: {kem_ciphertext_b64_bytes.hex()[:20]}...")
+                print(f"DEBUG: FULL PAYLOAD HEX: {payload.hex()}")
+                print(f"DEBUG: PAYLOAD HASH HEX: {payload_hash.hex()}")
             except Exception as e:
                 print(f"Error constructing payload for verification: {e}")
                 continue
 
             print(f"--- Verification ---")
-            is_valid_hash = verify_dilithium_signature(sender_pk, payload_hash, msg.signature)
-            is_valid_raw = verify_dilithium_signature(sender_pk, payload, msg.signature)
+            print(f"--- Verification ---")
+            # Reference Repo uses Raw Message + ML-DSA
+            is_valid = verify_dilithium_signature(sender_pk, payload, msg.signature)
             
-            if is_valid_hash:
-                 print(f"Signature Verification (Hash): SUCCESS")
-            elif is_valid_raw:
-                 print(f"Signature Verification (Raw): SUCCESS (Warning: Client using legacy raw signing)")
+            if is_valid:
+                 print(f"Signature Verification: SUCCESS")
             else:
                  print(f"Signature Verification: FAILED")
                  print(f"Start Hex: {payload[:32].hex()}")
-                 # Decide whether to block:
-                 # User said "I want to use dilithium kyber for signature", implying they want it verified.
-                 # So we should block if invalid.
-                 # print("Dropping invalid message.")
-                 # continue
-                 # However, since we are debugging, I will WARN but ALLOW for now so they can verify the flow?
-                 # No, "I want to use" usually means "Enforce it".
-                 # But if it fails, the app breaks.
-                 # I will Block ID it fails.
+                 
+                 # DUMP TO FILE FOR DEBUGGING
+                 # json is already imported at top
+                 debug_data = {
+                     "pk_b64": sender_pk, 
+                     # sender_pk is available from the loop above
+                 }
+                 # Actually, sender_pk is passed to this loop. It is 'sender_pk' (bytes? No, it's implicitly derived/fetched?)
+                 # In loop: sender_pk = manager.get_client_key(msg.sender_id)['dilithium'] (It is B64 string)
+                 
+                 with open("debug_mismatch.json", "w") as f:
+                     json.dump({
+                         "public_key_b64": sender_pk,
+                         "payload_hex": payload.hex(),
+                         "signature_b64": msg.signature,
+                         "sender_id": msg.sender_id
+                     }, f, indent=2)
+                 print("DEBUG: Dumped mismatch artifacts to debug_mismatch.json")
+                 
                  print("ERROR: Dropping message due to invalid signature.")
                  continue
 
