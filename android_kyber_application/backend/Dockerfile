@@ -35,6 +35,7 @@ RUN git clone --branch main --single-branch https://github.com/open-quantum-safe
 
 # Setup App
 WORKDIR /app
+COPY . .
 COPY start.sh .
 RUN chmod +x start.sh
 
