@@ -35,10 +35,8 @@ RUN git clone --branch main --single-branch https://github.com/open-quantum-safe
 
 # Setup App
 WORKDIR /app
-COPY . .
-
-# Expose port
-EXPOSE 8001
+COPY start.sh .
+RUN chmod +x start.sh
 
 # Run server
-CMD python3 -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8001}
+CMD ["./start.sh"]
